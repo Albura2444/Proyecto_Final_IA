@@ -1,0 +1,124 @@
+# ============================================================
+# PROYECTO FINAL - INTELIGENCIA ARTIFICIAL
+# Predicción de deserción estudiantil con Machine Learning
+# ============================================================
+
+# Instalación recomendada en Google Colab:
+# !pip install ucimlrepo scikit-learn pandas matplotlib seaborn
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+from ucimlrepo import fetch_ucirepo
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+
+# 1. Cargar dataset desde UCI
+student_dropout = fetch_ucirepo(id=697)
+X = student_dropout.data.features
+y_original = student_dropout.data.targets
+
+# 2. Preparar variable objetivo
+# Dataset original: Dropout, Enrolled, Graduate
+# Para este prototipo: Dropout = 1, otros = 0
+if isinstance(y_original, pd.DataFrame):
+    y_original = y_original.iloc[:, 0]
+
+y = (y_original == 'Dropout').astype(int)
+
+print('Tamaño del dataset:', X.shape)
+print('Distribución de clases:')
+print(y.value_counts())
+
+# 3. División entrenamiento/prueba
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.20,
+    random_state=42,
+    stratify=y
+)
+
+# 4. Definir modelos
+modelos = {
+    'Regresión Logística': Pipeline([
+        ('scaler', StandardScaler()),
+        ('model', LogisticRegression(max_iter=1000, class_weight='balanced'))
+    ]),
+    'Árbol de Decisión': DecisionTreeClassifier(
+        max_depth=6,
+        random_state=42,
+        class_weight='balanced'
+    ),
+    'Random Forest': RandomForestClassifier(
+        n_estimators=200,
+        max_depth=10,
+        random_state=42,
+        class_weight='balanced'
+    )
+}
+
+# 5. Entrenar y evaluar
+resultados = []
+for nombre, modelo in modelos.items():
+    modelo.fit(X_train, y_train)
+    y_pred = modelo.predict(X_test)
+
+    resultados.append({
+        'Modelo': nombre,
+        'Accuracy': accuracy_score(y_test, y_pred),
+        'Precision': precision_score(y_test, y_pred),
+        'Recall': recall_score(y_test, y_pred),
+        'F1-score': f1_score(y_test, y_pred)
+    })
+
+    print('\n==================================================')
+    print(nombre)
+    print('Matriz de confusión:')
+    print(confusion_matrix(y_test, y_pred))
+    print('\nReporte de clasificación:')
+    print(classification_report(y_test, y_pred, target_names=['No deserción', 'Deserción']))
+
+resultados_df = pd.DataFrame(resultados).sort_values(by='F1-score', ascending=False)
+print('\nResumen comparativo:')
+print(resultados_df)
+
+# 6. Validación cruzada del mejor modelo
+mejor_nombre = resultados_df.iloc[0]['Modelo']
+mejor_modelo = modelos[mejor_nombre]
+scores = cross_val_score(mejor_modelo, X, y, cv=5, scoring='f1')
+print(f'\nMejor modelo: {mejor_nombre}')
+print('F1 promedio con validación cruzada:', scores.mean())
+
+# 7. Importancia de variables si el mejor modelo es Random Forest o árbol
+modelo_rf = modelos['Random Forest']
+modelo_rf.fit(X_train, y_train)
+importancias = pd.DataFrame({
+    'Variable': X.columns,
+    'Importancia': modelo_rf.feature_importances_
+}).sort_values(by='Importancia', ascending=False).head(10)
+
+print('\nTop 10 variables más importantes según Random Forest:')
+print(importancias)
+
+plt.figure(figsize=(10,5))
+plt.barh(importancias['Variable'], importancias['Importancia'])
+plt.gca().invert_yaxis()
+plt.title('Variables más importantes para predecir deserción')
+plt.xlabel('Importancia')
+plt.tight_layout()
+plt.show()
+
+# 8. Ejemplo de predicción con un estudiante del conjunto de prueba
+ejemplo = X_test.iloc[[0]]
+probabilidad = modelo_rf.predict_proba(ejemplo)[0][1]
+prediccion = modelo_rf.predict(ejemplo)[0]
+
+print('\nEjemplo de predicción:')
+print('Probabilidad de deserción:', round(probabilidad * 100, 2), '%')
+print('Clasificación:', 'Riesgo de deserción' if prediccion == 1 else 'Sin riesgo alto')
